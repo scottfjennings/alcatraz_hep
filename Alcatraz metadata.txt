@@ -1,0 +1,1 @@
+Stage is calculated based on the estimated chick age, so is really a different than the HEP Stage field. But we're still using it for screening.
