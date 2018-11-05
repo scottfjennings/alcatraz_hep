@@ -1,13 +1,13 @@
 
 ## this file contains code and instructions for converting Alcatraz nest monitoring data to our HEP data format
 
-## all this code should work fine if you acceessed it via the R Project named "Alcatraz". If you simply opened the R code file named "alcatraz", then you will have problems with file paths. 
+## all this code should work fine if you acceessed it via the R Project named "alcatraz_hep". If you simply opened the R code file named "alcatraz", then you will have problems with file paths. 
 
 
-## the data we get for Alcatraz is in a pretty funky format.
+## the data we get from USGS for Alcatraz is in a pretty funky format.
 ## it comes in a xlsx file, with a sheet for each species
 ## in each species sheet, there are 3 rows at the top before the data actually start
-## then the actual nest check data are arranged in a wide format, with a row for each nest and then sets of columns for each nest check (e.g. date, nest contents, etc) stacked horizontally out as far as needed to match the number of checks for each nest
+## then the actual nest check data are arranged in a wide format, with a row for each nest and then repeating sets of columns for each nest check (e.g. date, nest contents, etc) stacked horizontally out as far as needed to match the number of checks for each nest
 ## the number of checks varies between species and between individual nests, so I tried to make the code below as reactive as possible to number of checks
 
 ## while xlsx can be read in to R, the data behave a little better if you first make csv files for each species.
@@ -21,7 +21,8 @@
 # load the required packages
 library(tidyverse) 
 library(lubridate)
-
+library(xlsx)
+library(stringr)
 
 # first is a function to read in the csv files for each species
 # this should set the file name correctly, but double check that the data we got from USGS or whoever was named following the standard they used in 2015-17 (e.g. Alcatraz2017data_FINAL)
@@ -37,6 +38,21 @@ return(ztabl)
 # call the funtion for each species, specifying the year you're working with
 sneg <- alcatraz_reader("2017", "sneg")
 bcnh <- alcatraz_reader("2017", "bcnh")
+
+# reading directly from the xlsx is slow but works fine
+alcatraz_reader_xlsx <- function(year, species){
+  filename <- paste("alcatraz", year, "/Alcatraz", year, "data_FINAL.xlsx", sep="")
+  ztabl <- read.xlsx(filename,
+                     sheetIndex = species,
+                     startRow = 3) %>% 
+    select(-starts_with("NA")) # this trims off any random empty columns
+  
+  return(ztabl)
+}
+
+bcnh <- alcatraz_reader_xlsx("2017", "BCNH")
+
+
 
 # in all the following functions, "sp.df" is the data frame for a particular species; these data frames are what we just created with "alcatraz_reader"
 
@@ -59,27 +75,30 @@ bcnh_info <- alcatraz_nest_infoer(bcnh)
 # most of what we peel out here has a direct match to what's collected in the HEP protocol, but the format is slightly different 
 alcatraz_nest_checker <- function(sp.df){
 # determine how many sets of check columns there are
+  sp.df <- bcnh
 num.check.col.groups <- (ncol(sp.df) - 7 - 2)/5
 # make a list of numbers representing each 
 num.check.repeats <- seq(1, length.out = num.check.col.groups - 1, by = 1)
 
 check0 <- sp.df %>% 
-  select(NO., SPP, DATE, Egg, Chick, Age, Notes)
-
+  select(NO., SPP, DATE, Egg, Chick, Age, Notes) %>% 
+  mutate_at(c("Egg", "Age", "Chick", "Notes"), as.character) # to avoid warnings upon rbind()ing below
+# when the xlsx file is read, duplicate column names are given sequential trailing numbers.
+# this sub-function selects just those columns with matching trailing numbers, with the trailing number specified with "check.repeat"
 checker <- function(check.repeat){
   dot.check.repeat <- paste(".", check.repeat, sep = "")
 check <- sp.df %>% 
   select(NO., SPP, contains(dot.check.repeat), -contains("X.")) %>% 
-  rename_all(~sub(dot.check.repeat, '', .x))
+  rename_all(~sub(dot.check.repeat, '', .x)) %>% 
+  mutate_at(c("Egg", "Age", "Chick", "Notes"), as.character) # to avoid warnings upon rbind()ing below
 return(check)
 }
 
-
+# now run checker() on each repeated set of check columns IDed in num.check.repeats()
 checks1 <- map_df(num.check.repeats, checker)
-
-checks <- rbind(check0, checks1) %>% 
-  unique() %>% 
-  drop_na(Egg, Chick, Age)
+# bind to the first check set of columns and do some cleaning
+checks <- rbind(check0, checks1)%>% 
+  unique() 
 
 return(checks)
 }
@@ -87,12 +106,62 @@ return(checks)
 sneg_checks <- alcatraz_nest_checker(sneg)
 bcnh_checks <- alcatraz_nest_checker(bcnh)
 
+##-----------------------------------------------------------------------------------------
+## many records with no info in Egg or Chick are nonetheless valuable because if information contained in the notes. e.g. specification that the nest was missed (filling Egg and Chick with 9) or specification that the nest was empty (Egg adn Chick = 0)
+## this function fills in Egg adn Chick for some of the most common such occurences 
+notes_extracter <- function(sp_checks){
+  sp_checks2 <- sp_checks %>% 
+  mutate_all(trimws) %>% 
+  mutate(Egg = sub("\\+$", "", Egg)) %>% 
+  mutate_at(c("Egg", "Age", "Chick"), as.numeric) %>% # this isn't explicit, but converting to numeric is a shortcut way to convert dashes to NA
+  mutate(Egg = ifelse(is.na(Egg) & (!is.na(Chick) | !is.na(Age)), 9, Egg),
+         Chick = ifelse(is.na(Chick) & (!is.na(Egg) | !is.na(Age)), 9, Chick),
+         Age = ifelse(is.na(Age) & (!is.na(Chick) | !is.na(Egg)), 999, Age)) %>% 
+  mutate(Notes = tolower(Notes)) %>% 
+  mutate(Egg2 = ifelse(is.na(Egg) & 
+                         (str_detect(Notes, "empty") | 
+                            str_detect(Notes, "destroyed")), 0, Egg),
+         Egg2 = ifelse(is.na(Egg) & 
+                         (str_detect(Notes, "missed") | 
+                          str_detect(Notes, "could not relocate") |
+                          str_detect(Notes, "not found")), 9, Egg2)) %>% 
+  mutate(Chick2 = ifelse(is.na(Chick) & 
+                         (str_detect(Notes, "empty") | 
+                            str_detect(Notes, "destroyed")), 0, Chick),
+         Chick2 = ifelse(is.na(Chick) & (str_detect(Notes, "chick") | str_detect(Notes, "chicks")), 8, Chick),
+         Chick2 = ifelse(Chick2 == 8 & str_detect(Notes, "no") & str_detect(Notes, "chick") & str_detect(Notes, "heard"), 9, Chick2),
+         Chick2 = ifelse(is.na(Chick) & 
+                         (str_detect(Notes, "missed") | 
+                            str_detect(Notes, "could not relocate") |
+                            str_detect(Notes, "not found")), 9, Chick2)) %>% 
+  select(-Egg, -Chick) %>% 
+  select(NO., SPP, DATE, Egg = Egg2, Chick = Chick2, Age, Notes)  %>% 
+  filter(!is.na(Egg) | !is.na(Chick)) %>% 
+  arrange(NO., DATE)
+                           
+}
+
+bcnh_checks2 <- notes_extracter(bcnh_checks)
+
+ 
+
+## here's a helper function to check what the most common notes are and compare to the notes that are specified in notes_extracter() to make sure we're dealing with the important ones
+alc_noter <- function(sp_checks) {
+  sp_notes <- sp_checks %>% 
+  select(Notes) %>% 
+  mutate(Notes = sub("\\.$", "", Notes),
+         Notes = tolower(Notes)) %>% 
+  table() %>% 
+  data.frame() %>% 
+  arrange(-Freq)
+}
+bcnh_notes <- alc_noter(bcnh_checks)
 
 #--------------------------------------------------------
 # now a function to convert check data from the Alcatraz format to the HEP_screening format
 # note that there are some species-specific assumptions built in to the generation of Stage
-# also note that while the drop_na command removes records with no real data, some of these records might have info in the notes that may be valuable for some non-hep related projects (i.e. specification that a nest was missed on a particular day)
-alcatraz2HEPer <- function(zchecks, zspp){
+
+alcatraz2HEPer <- function(sp_checks, zspp){
 # create a small df with some of the nest stage boundaries
 stages <- data.frame(spp = c("BCNH", "SNEG"),
                      end.stg1 = c(10, 10),
@@ -101,7 +170,7 @@ stages <- data.frame(spp = c("BCNH", "SNEG"),
 sp.stages <- filter(stages, spp == zspp)
 
 # now the big chunk to generate the HEP_screening data structure
-hep.checks <- zchecks %>%
+hep_checks <- sp_checks %>%
   setNames(tolower(names(.))) %>% 
   rename(ch.age = age) %>% 
   mutate(date = mdy(date),
@@ -125,7 +194,7 @@ hep.checks <- zchecks %>%
   select(date, nest = no., spp, status, adults, stage, chicks = chick, confidence, notes) %>% 
   unique()   
 
-return(hep.checks)
+return(hep_checks)
 }
 
 
