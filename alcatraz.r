@@ -108,8 +108,12 @@ bcnh_checks <- alcatraz_nest_checker(bcnh)
 
 ##-----------------------------------------------------------------------------------------
 ## many records with no info in Egg or Chick are nonetheless valuable because if information contained in the notes. e.g. specification that the nest was missed (filling Egg and Chick with 9) or specification that the nest was empty (Egg adn Chick = 0)
+<<<<<<< HEAD
 ## this function fills in Egg and Chick for some of the most common such occurences
 ## warnings about NAs introduced by coercion are OK
+=======
+## this function fills in Egg adn Chick for some of the most common such occurences 
+>>>>>>> 18b203df650cc02f6b62665305ade756127976d5
 notes_extracter <- function(sp_checks){
   sp_checks2 <- sp_checks %>% 
   mutate_all(trimws) %>% 
