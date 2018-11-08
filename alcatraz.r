@@ -4,9 +4,9 @@
 ## all this code should work fine if you acceessed it via the R Project named "alcatraz_hep". If you simply opened the R code file named "alcatraz", then you will have problems with file paths. 
 
 
-## the data we get from USGS for Alcatraz is in a funky format.
-## it comes in a xlsx file, with a sheet for each species
-## in each species sheet, there are 3 rows at the top before the data actually start, with the column names occupying 2 rows
+## the data files we get from USGS for Alcatraz are in a funky format.
+## they come in a xlsx file, with a sheet for each species (but 2018 data had both species in 1 sheet)
+## in each species sheet, there are 3 rows at the top before the data actually start, with the column names occupying the 2nd and 3rd rows (yes, column names spanning 2 rows)
 ## then the actual nest check data are arranged in a wide format, with a row for each nest and then repeating sets of columns for each nest check (e.g. date, nest contents, etc) stacked horizontally out as far as needed to match the number of checks for each nest
 ## the number of checks varies between species and between individual nests, so the code below reactive to the nest-specific number of checks
 
@@ -18,29 +18,36 @@ library(xlsx)
 library(stringr)
 
 
-alcatraz_reader_xlsx <- function(year, species){
+alcatraz_reader_xlsx <- function(year, worksheet, filename){
   # first is a function to read in the csv files for each species
-  # this should set the file name correctly, but double check that the data we got from USGS was named following the standard they used in 2015-17 (e.g. Alcatraz2017data_FINAL)
-  # reading directly from the xlsx is slow but works fine
-  filename <- paste("alcatraz", year, "/Alcatraz", year, "data_FINAL.xlsx", sep="")
-  ztabl <- read.xlsx(filename,
-                     sheetIndex = species,
+  # if the data file we got from USGS was named following the standard they used in 2015-17 (e.g. Alcatraz2017data_FINAL), then 'filename' can be left out. I made this function flexible on filename so that we can avoid renaming files that we get from USGS, thus hopefully avoinding confusion about file history and version
+  # if the data file has a separate sheet for each species, then this reader function needs to be called multiple times to import each species separately, and 'worksheet' should be the name of the worksheet for the appropriate species
+  # if all species are combined on the same sheet, then the function only needs to be called once
+  # reading directly from the xlsx is slow but works fine, and is a more streamlined process than saving the xlsx's as csv's before importing to R
+  if(missing(filename)) {
+    filepath <- paste("data_from_USGS/Alcatraz", year, "data_FINAL.xlsx", sep="")
+  } else {
+    filepath <- paste("data_from_USGS/", filename, ".xlsx", sep="")
+  }
+  
+  
+  ztabl <- read.xlsx(filepath,
+                     sheetIndex = worksheet,
                      startRow = 3) %>% 
     select(-starts_with("NA")) # this trims off any random empty columns
   
   return(ztabl)
 }
 
-bcnh <- alcatraz_reader_xlsx("2017", "BCNH")
+bcnh <- alcatraz_reader_xlsx(year = "2017", worksheet = "BCNH")
 sneg <- alcatraz_reader_xlsx("2017", "SNEG")
 
+all_alc2018 <- alcatraz_reader_xlsx(year = "2018", worksheet = "Sheet1", filename = "Alcatraz2018data_forACR")
 
 
 #--------------------------------------------------------
 
-#--------------------------------------------------------
-
-alcatraz_nest_infoer <- function(sp.df){
+#alcatraz_nest_infoer <- function(sp.df){
   # next a function to extract info on nest characteristics
   # most of this info is stuff that's not normally collected as part of the HEP protocol, but here's a function to pull it out in case its needed sometime
   # INPUT: "sp.df" is the data frame for a particular species, that we just created with "alcatraz_reader"
@@ -49,8 +56,8 @@ nest.info <- sp.df %>%
 return(nest.info)
 }
 
-sneg_info <- alcatraz_nest_infoer(sneg)
-bcnh_info <- alcatraz_nest_infoer(bcnh)
+#sneg_info <- alcatraz_nest_infoer(sneg)
+#bcnh_info <- alcatraz_nest_infoer(bcnh)
 
 #--------------------------------------------------------
 
@@ -60,10 +67,14 @@ alcatraz_nest_checker <- function(sp.df){
   # when the xlsx file is read, duplicate column names are given sequential trailing numbers.
   # INPUT: "sp.df" is the data frame for a particular species, that we just created with "alcatraz_reader"
 #-----
+  
 # determine how many sets of check columns there are
-num.check.col.groups <- (ncol(sp.df) - 7 - 2)/5
+#num.check.col.groups <- (ncol(sp.df) - 7 - 2)/5
+num.check.col.groups <- sp.df %>% 
+  select(matches("\\d")) %>% # column names that contain a digit
+  summarize(num.groups = ncol(.)/5) # there are 5 standard columns for each nest check
 # make a list of numbers representing each set of check columns
-num.check.repeats <- seq(1, length.out = num.check.col.groups - 1, by = 1)
+num.check.repeats <- seq(1, length.out = num.check.col.groups[1, 1] - 1, by = 1)
 
 check0 <- sp.df %>% 
   select(NO., SPP, DATE, Egg, Chick, Age, Notes) %>% 
@@ -73,12 +84,12 @@ check0 <- sp.df %>%
 checker <- function(check.repeat){
   dot.check.repeat <- paste(".", check.repeat, sep = "")
 check <- sp.df %>% 
-  select(NO., SPP, contains(dot.check.repeat), -contains("X.")) %>% 
-  rename_all(~sub(dot.check.repeat, '', .x)) %>% 
+  select(NO., SPP, ends_with(dot.check.repeat), -contains("X.")) %>% 
+  rename_all(~sub(dot.check.repeat, '', .x)) %>% # get rid of the digits in column names
   mutate_at(c("Egg", "Age", "Chick", "Notes"), as.character) # to avoid warnings upon rbind()ing below
 return(check)
 }
-foo8 <- checker(8)
+
 # now run checker() on each repeated set of check columns IDed in num.check.repeats()
 checks1 <- map_df(num.check.repeats, checker)
 # bind to the first check set of columns and do some cleaning
@@ -92,10 +103,18 @@ return(checks)
 sneg_checks <- alcatraz_nest_checker(sneg)
 bcnh_checks <- alcatraz_nest_checker(bcnh)
 
+#all_alc2018_checks <- alcatraz_nest_checker(all_alc2018)
+
+
+## if working with multiple species dataframes, COMBINE THEM NOW.
+# the functions below will work with single species data frames, but combining now makes for fewer function calls below
+# rbind() can take >2 objects
+all_alc2017_checks <- rbind(sneg_checks, bcnh_checks)
+
 ##-----------------------------------------------------------------------------------------
 
 notes_extracter <- function(sp_checks){
-  # fill the Egg or Chick fields with data extracted from the notes fiels, as appropriate
+  # fill the Egg or Chick fields with data extracted from the notes field, as appropriate
   # many records with no info in Egg or Chick are nonetheless valuable because the notes specify that the nest was empty (Egg and Chick = 0); is valuable info for nest screening, allowing a nest's record to end with an affirmative failure rather than just no data
   # this function fills in Egg and Chick for some of the most common such occurences
   # warnings about NAs introduced by coercion are OK
@@ -126,10 +145,20 @@ notes_extracter <- function(sp_checks){
   distinct()
                            
 }
-sneg_checks_extracted <- notes_extracter(sneg_checks)
-bcnh_checks_extracted <- notes_extracter(bcnh_checks)
 
-## IMPORTANT MANUAL STEP HERE: examine the ...checks_extracted outputs to make sure no valuable/valid records have been classified with keeper == "N"
+
+all_alc2017_checks_extracted<- notes_extracter(all_alc2017_checks)
+all_alc2018_checks_extracted<- notes_extracter(all_alc2018_checks)
+
+#--------------------------------------------------------
+## IMPORTANT MANUAL STEP HERE: examine the ...checks_extracted outputs to make sure no valuable/valid records have been classified with keeper == "N". 
+
+#Probably just need to look at records that have Notes
+keeperN_with_noter <- function(sp_checks_extracted) {
+  alc_keeperN_with_notes <- sp_checks_extracted %>% 
+    filter(keeper == "N", !is.na(Notes))
+}
+alc_keeperN_with_notes <- keeperN_with_noter(all_alc2017_checks_extracted)
 
 alc_noter <- function(sp_checks) {
   # a helper function to check what the most common notes are and compare to the notes that are specified in notes_extracter() to make sure we're dealing with the important ones
@@ -151,47 +180,48 @@ trim_keepers <- function(sp_checks_extracted){
     select(-keeper)
 }
 
-bcnh_checks_trimmed <- trim_keepers(bcnh_checks_extracted)
-sneg_checks_trimmed <- trim_keepers(sneg_checks_extracted)
+
+all_alc2017_checks_trimmed <- trim_keepers(all_alc2017_checks_extracted)
 
 #--------------------------------------------------------
 
-alcatraz2HEPer <- function(sp_checks, zspp){
+alcatraz2HEPer <- function(sp_checks){
   # finally convert check data from the Alcatraz format (massaged by above functions) to the HEP_screening format, including addition and filling of HEP-specific fields (status, stage, confidence)
   # note that there are some species-specific assumptions built in to the generation of Stage
   # if GREG or GBHE ever nest on Alcatraz the assignment of stages in this function will need to be changed to include stage 3
   
 # create a small df with some of the nest stage boundaries
-stages <- data.frame(spp = c("BCNH", "SNEG"),
+stages <- data.frame(SPP = c("BCNH", "SNEG"),
                      end.stg2 = c(10, 10),
                      end.stg4 = c(15, 14))  
-# filter to the current species
-sp.stages <- filter(stages, spp == zspp)
+
+zsp_checks <- sp_checks %>% 
+  left_join(., stages, by = c("SPP"))
+
+
 
 # now the big sub-function to generate the HEP_screening data structure
-hep_checks <- sp_checks %>%
+hep_checks <- zsp_checks %>%
   setNames(tolower(names(.))) %>% 
   rename(ch.age = age) %>% 
   mutate(date = ymd(date),
          adults=as.numeric(""),
          stage = NA,
          stage = ifelse(chick == 0 & egg > 0, 1, stage),
-         stage = ifelse(chick > 0 & ch.age <= sp.stages$end.stg2, 2, stage),
-         stage = ifelse(chick>0 & ch.age > sp.stages$end.stg2 & ch.age < sp.stages$end.stg4, 4, stage),
-         stage = ifelse(chick>0 & ch.age > sp.stages$end.stg4, 5, stage),
+         stage = ifelse(chick > 0 & ch.age <= end.stg2, 2, stage),
+         stage = ifelse(chick>0 & ch.age > end.stg2 & ch.age < end.stg4, 4, stage),
+         stage = ifelse(chick>0 & ch.age > end.stg4, 5, stage),
          confidence = "",
-         status = ifelse(egg == 0 & chick == 0, "I", "A")) %>% 
-  arrange(no., date) %>% 
+         status = ifelse(egg == 0 & chick == 0, "I", "A"))
   select(date, nest = no., spp, status, adults, stage, chicks = chick, confidence, notes) %>% 
-  unique()   
-
+  arrange(nest, spp, date) %>% 
+  unique() 
 return(hep_checks)
 }
 
 
+alc2017_hep <- alcatraz2HEPer(all_alc2017_checks_trimmed)
 
-sneg_hep <- alcatraz2HEPer(sneg_checks_trimmed, "SNEG")
-bcnh_hep <- alcatraz2HEPer(bcnh_checks_trimmed, "BCNH")
 
 
 by_day_check_checker <- function(sp_hep) {
@@ -206,8 +236,8 @@ by_day_check_checker <- function(sp_hep) {
     arrange(nest, date)
   
 }
-bcnh_dups <- by_day_check_checker(bcnh_hep)
-sneg_dups <- by_day_check_checker(sneg_hep)
+
+alc2017_hep_dups <- by_day_check_checker(alc2017_hep)
 
 
 dup_check_scrubber <- function(sp_hep){
@@ -219,19 +249,20 @@ dup_check_scrubber <- function(sp_hep){
   group_by(nest, date) %>% 
   mutate(notes = (trimws(paste(notes, collapse = ' ')))) %>% 
   distinct() %>% 
-  mutate(notes = ifelse(notes == "", NA, notes))
+  mutate(notes = ifelse(notes == "", NA, notes)) %>% 
+  arrange(nest, spp, date)
 }
 
-bcnh_hep_noDups <- dup_check_scrubber(bcnh_hep)
-sneg_hep_noDups <- dup_check_scrubber(sneg_hep)
+alc2017_hep_noDups <- dup_check_scrubber(alc2017_hep)
 
-# HEP_screening code uses file with all species for a colony together.
+
+# HEP_screening code uses a file with all species for a colony together.
 ## combine SNEG and BCNH
 
 alcatraz_sneg_bcnh=rbind(sneg_hep, bcnh_hep) %>% 
   arrange(nest, spp, date)
 
-writefile <- paste("hep_screening/field_data/", year, "/alcatraz/alcatraz_sneg_bcnh_HEPscreen", year, ".csv", sep="")
-write.csv(alcatraz_sneg_bcnh, writefile, row.names = F)
+
+write.csv(alc2017_hep_noDups, "Alcatraz_ready4screening/alcatraz2017_4screening", row.names = F)
 
 
