@@ -103,7 +103,10 @@ checks <- rbind(check0, checks1) %>%
   mutate_at(c("Egg", "Age", "Chick"), as.numeric) %>% # this isn't explicit, but converting to numeric is a shortcut way to convert dashes to NA
   mutate(Notes = tolower(Notes)) %>% 
   filter(!is.na(DATE)) %>% 
+<<<<<<< HEAD
   filter(!is.na(SPP)) %>% 
+=======
+>>>>>>> b70dbccde0421ca0ebbdf26d0318996f985e4497
   unique() %>% 
   arrange(NO., DATE)
 
