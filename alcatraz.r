@@ -74,7 +74,7 @@ num.check.col.groups <- sp.df %>%
   select(matches("\\d")) %>% # column names that contain a digit
   summarize(num.groups = ncol(.)/5) # there are 5 standard columns for each nest check
 # make a list of numbers representing each set of check columns
-num.check.repeats <- seq(1, length.out = num.check.col.groups[1, 1] - 1, by = 1)
+num.check.repeats <- seq(1, length.out = num.check.col.groups[1, 1], by = 1)
 
 check0 <- sp.df %>% 
   select(NO., SPP, DATE, Egg, Chick, Age, Notes) %>% 
