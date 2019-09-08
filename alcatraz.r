@@ -214,6 +214,7 @@ all_dups_Fixed <- all_dups_pasted_egg_chick_ageFixed %>%
   select(NO., SPP, DATE, Egg, Chick, Age.good, Notes, -Age) %>% 
   rename(Age = Age.good)
 
+rm(all_dups_pasted_eggFixed, all_dups_pasted_egg_chickFixed, all_dups_pasted_egg_chick_ageFixed)
 
 ##-----------------------------------------------------------------------------------------
 
@@ -257,18 +258,25 @@ notes_extracter <- function(sp_checks){
                             str_detect(Notes, "renest") | 
                             str_detect(Notes, "re-nest") |
                             (str_detect(Notes, "see") & str_detect(Notes, "\\d")) |
-                            (str_detect(Notes, "now") & str_detect(Notes, "\\d"))), "Y", NA), 
-         Egg2 = ifelse(is.na(Egg) & notes.failed == "Y", 0, Egg),
-         Egg2 = ifelse(Notes == "not checked", 9, Egg2),
-         Chick2 = ifelse(is.na(Chick) & str_detect(Notes, "chick"), 8, Chick),
-         Chick2 = ifelse(Chick2 == 8 & str_detect(Notes, "no") & str_detect(Notes, "chick"), 9, Chick2),
-         Chick2 = ifelse(is.na(Chick) & notes.failed == "Y", 0, Chick),
-         Chick2 = ifelse(Notes == "not checked", 9, Chick2)) %>% 
-  select(-Egg, -Chick) %>% 
-  select(NO., SPP, DATE, Egg = Egg2, Chick = Chick2, Age, Notes, notes.failed)  %>% 
-  mutate(keeper = ifelse(is.na(Egg) & is.na(Chick), "N", "Y")) %>% 
-  arrange(NO., DATE) %>% 
-  distinct()
+                            (str_detect(Notes, "now") & str_detect(Notes, "\\d"))), "Y", "N"),
+         notes.failed = ifelse(is.na(Notes), "N", notes.failed)) 
+  
+  sp_checks3 <- sp_checks2 %>% 
+    mutate(Egg2 = ifelse(Notes == "not checked", 9, Egg),
+           Chick2 = ifelse(Notes == "not checked", 9, Chick),
+           Egg2 = ifelse(notes.failed == "Y", 0, Egg2),
+           Chick2 = ifelse(is.na(Chick2) & str_detect(Notes, "chick"), 8, Chick2),
+           Chick2 = ifelse(Chick2 == 8 & str_detect(Notes, "no") & str_detect(Notes, "chick"), 9, Chick2),
+           Chick2 = ifelse(is.na(Chick2) & notes.failed == "Y", 0, Chick2),
+           Egg2 = ifelse(is.na(Egg2), Egg, Egg2),
+           Chick2 = ifelse(is.na(Chick2), Chick, Chick2)) 
+  
+  sp_checks4 <- sp_checks3 %>% 
+    select(-Egg, -Chick) %>%
+    select(NO., SPP, DATE, Egg = Egg2, Chick = Chick2, Age, Notes, notes.failed)  %>% 
+    mutate(keeper = ifelse(is.na(Egg) & is.na(Chick), "N", "Y")) %>%
+    arrange(NO., DATE) %>%
+    distinct()
                            
 }
 
@@ -328,6 +336,7 @@ zsp_checks <- sp_checks %>%
 
 
 # now the meat of the function to generate the HEP_screening data structure
+
 hep_checks <- zsp_checks %>%
   setNames(tolower(names(.))) %>% 
   rename(ch.age = age) %>% 
@@ -339,8 +348,11 @@ hep_checks <- zsp_checks %>%
          stage = ifelse(chick > 0 & !is.na(chick) & ch.age > end.stg2 & ch.age < end.stg4, 4, stage),
          stage = ifelse(chick > 0 & !is.na(chick) & ch.age > end.stg4, 5, stage),
          confidence = "",
-         status = ifelse((egg == 0 & chick == 0) | (egg == 0 & is.na(chick)) | (is.na(egg) & chick == 0), "I", "A"),
-         status = ifelse(notes == "not checked", "P", status)) %>% 
+         status = "A",
+         status = ifelse(egg == 0 & chick == 0, "I", status),
+         status = ifelse(egg == 0 & is.na(chick), "I", status),
+         status = ifelse(is.na(egg) & chick == 0, "I", status),
+         status = ifelse(notes == "not checked" & !is.na(notes), "P", status)) %>% 
   select(date, nest = no., spp, status, adults, stage, chicks = chick, confidence, notes) %>% 
   arrange(nest, spp, date) %>% 
   unique() 
@@ -358,5 +370,33 @@ filter(alc_hep, status == "I", stage > 0, chicks > 0) # there should be no recor
 
   
 write.csv(alc_hep, "Alcatraz_ready4screening/alcatraz2018_4screening20190908.csv", row.names = F)
+###
+
+alc_hep <- read.csv("Alcatraz_ready4screening/alcatraz2018_4screening20190908.csv")
+
+nest_viewer <- function(zspp, znest, znest.exact = FALSE) {
+  if(znest.exact == FALSE) {
+  alc_hep %>% 
+    filter(spp == zspp & grepl(znest, nest)) %>% 
+    arrange(date)
+  } else {
+      alc_hep %>% 
+    filter(spp == zspp, nest == znest) %>% 
+    arrange(date)
+  }
+}
+
+
+nest_viewer_all_checks <- function(zspp, znest, znest.exact = FALSE) {
+  if(znest.exact == FALSE) {
+  all_checks %>% 
+    filter(SPP == zspp & grepl(znest, NO.)) %>% 
+    arrange(DATE)
+  } else {
+      all_checks %>% 
+    filter(SPP == zspp, NO. == znest) %>% 
+    arrange(DATE)
+  }
+}
 
 
