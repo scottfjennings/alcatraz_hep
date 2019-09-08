@@ -217,6 +217,28 @@ all_dups_Fixed <- all_dups_pasted_egg_chick_ageFixed %>%
 
 ##-----------------------------------------------------------------------------------------
 
+zoof <- table(all_checks$Notes) %>% data.frame()
+zoof2 <- zoof %>% filter(!grepl("egg", Var1) & 
+                           !grepl("chick", Var1) & 
+                           !grepl("empty", Var1) & 
+                           !grepl("destroy", Var1) & 
+                           !grepl("hatch", Var1) & 
+                           !grepl("renest", Var1) & 
+                           !grepl("re-nest", Var1) & 
+                           !grepl("not checked", Var1) & 
+                           !grepl("depredated", Var1) & 
+                           !grepl("dead", Var1) & 
+                           !grepl("dying", Var1) & 
+                           !grepl("away", Var1) & 
+                           !grepl("left nest", Var1) & 
+                           !grepl("gone", Var1) & 
+                           !grepl("incub", Var1)) %>% 
+  arrange(-Freq)
+
+fooz <- all_checks %>% 
+  filter(!is.na(Notes))
+
+
 notes_extracter <- function(sp_checks){
   # fill the Egg or Chick fields with data extracted from the notes field, as appropriate
   # many records with no info in Egg or Chick are nonetheless valuable because the notes specify that the nest was empty (Egg and Chick = 0); is valuable info for nest screening, allowing a nest's record to end with an affirmative failure rather than just no data
@@ -237,9 +259,11 @@ notes_extracter <- function(sp_checks){
                             (str_detect(Notes, "see") & str_detect(Notes, "\\d")) |
                             (str_detect(Notes, "now") & str_detect(Notes, "\\d"))), "Y", NA), 
          Egg2 = ifelse(is.na(Egg) & notes.failed == "Y", 0, Egg),
+         Egg2 = ifelse(Notes == "not checked", 9, Egg2),
          Chick2 = ifelse(is.na(Chick) & str_detect(Notes, "chick"), 8, Chick),
          Chick2 = ifelse(Chick2 == 8 & str_detect(Notes, "no") & str_detect(Notes, "chick"), 9, Chick2),
-         Chick2 = ifelse(is.na(Chick) & notes.failed == "Y", 0, Chick)) %>% 
+         Chick2 = ifelse(is.na(Chick) & notes.failed == "Y", 0, Chick),
+         Chick2 = ifelse(Notes == "not checked", 9, Chick2)) %>% 
   select(-Egg, -Chick) %>% 
   select(NO., SPP, DATE, Egg = Egg2, Chick = Chick2, Age, Notes, notes.failed)  %>% 
   mutate(keeper = ifelse(is.na(Egg) & is.na(Chick), "N", "Y")) %>% 
@@ -315,7 +339,8 @@ hep_checks <- zsp_checks %>%
          stage = ifelse(chick > 0 & !is.na(chick) & ch.age > end.stg2 & ch.age < end.stg4, 4, stage),
          stage = ifelse(chick > 0 & !is.na(chick) & ch.age > end.stg4, 5, stage),
          confidence = "",
-         status = ifelse((egg == 0 & chick == 0) | (egg == 0 & is.na(chick)) | (is.na(egg) & chick == 0), "I", "A")) %>% 
+         status = ifelse((egg == 0 & chick == 0) | (egg == 0 & is.na(chick)) | (is.na(egg) & chick == 0), "I", "A"),
+         status = ifelse(notes == "not checked", "P", status)) %>% 
   select(date, nest = no., spp, status, adults, stage, chicks = chick, confidence, notes) %>% 
   arrange(nest, spp, date) %>% 
   unique() 
@@ -332,6 +357,6 @@ filter(alc_hep, status == "I", stage > 0, chicks > 0) # there should be no recor
 
 
   
-write.csv(alc_hep, "Alcatraz_ready4screening/alcatraz2018_4screening.csv", row.names = F)
+write.csv(alc_hep, "Alcatraz_ready4screening/alcatraz2018_4screening20190908.csv", row.names = F)
 
 
