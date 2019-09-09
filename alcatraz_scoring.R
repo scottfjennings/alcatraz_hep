@@ -1,5 +1,16 @@
 
 
+
+
+### DEPRECATED #####
+### DEPRECATED #####
+### DEPRECATED #####
+### DEPRECATED #####
+### USE hep_screen_v1.5 OR LATER FOR ALCATRAZ DATA ###
+
+
+
+
 ## this code makes the same product as the HEP_screening/code_data_files/hep_screen.R (a multi-sheet excel file that allows the manual screening of nest), but does so for the Alcatraz data we get from USGS
 ## Alcatraz requires a slightly-modified screening code because a couple key pieces of info that the main screening code relies on are not collected on Alcatraz (number of parents present and confidence in chick count). 
 ## also, the same visit info is not collected, so 
