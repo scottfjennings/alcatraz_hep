@@ -120,6 +120,7 @@ all_checks <- alcatraz_nest_checker(all_checks_usgs)
 # the functions below will work with single species data frames, but combining now makes for fewer function calls below
 # rbind() can take >2 objects
 all_checks <- rbind(sneg_checks, bcnh_checks)
+rm(sneg, sneg_checks, bcnh, bcnh_checks)
 
 ##-------------------------------------------------------------
 all_dup_check_checker <- function(all_checks) {
@@ -214,7 +215,9 @@ all_dups_Fixed <- all_dups_pasted_egg_chick_ageFixed %>%
   select(NO., SPP, DATE, Egg, Chick, Age.good, Notes, -Age) %>% 
   rename(Age = Age.good)
 
-rm(all_dups_pasted_eggFixed, all_dups_pasted_egg_chickFixed, all_dups_pasted_egg_chick_ageFixed)
+
+rm(all_dups_pasted_eggFixed, all_dups_pasted_egg_chickFixed, all_dups_pasted_egg_chick_ageFixed, all_dups_pasted, all_checks_dups)
+
 
 ##-----------------------------------------------------------------------------------------
 
@@ -249,12 +252,13 @@ notes_extracter <- function(sp_checks){
   # the user can double check the records with keeper == "N" in the output to make sure the rules for exclusion worked correctly for the current data file
   # alc_noter() below can help ID new records (with different notes) that may need to be included in this function
   # INPUT: sp_checks is the species-specific df created by alcatraz_nest_checker()
-
+sp_checks <- all_dups_Fixed
   sp_checks2 <- sp_checks %>%  
   mutate(notes.failed = ifelse(
                           #(is.na(Egg) & is.na(Chick)) & 
                          ((str_detect(Notes, "empty") & !str_detect(Notes, "missed")) | 
                             str_detect(Notes, "destroyed") | 
+                            str_detect(Notes, "depred") | 
                             str_detect(Notes, "renest") | 
                             str_detect(Notes, "re-nest") |
                             (str_detect(Notes, "see") & str_detect(Notes, "\\d")) |
@@ -262,8 +266,12 @@ notes_extracter <- function(sp_checks){
          notes.failed = ifelse(is.na(Notes), "N", notes.failed)) 
   
   sp_checks3 <- sp_checks2 %>% 
-    mutate(Egg2 = ifelse(Notes == "not checked", 9, Egg),
-           Chick2 = ifelse(Notes == "not checked", 9, Chick),
+    mutate(Egg2 = ifelse(grepl("not checked", Notes) | 
+                           grepl("not found", Notes) | 
+                           grepl("missed", Notes), 9, Egg),
+           Chick2 = ifelse(grepl("not checked", Notes) | 
+                           grepl("not found", Notes) | 
+                           grepl("missed", Notes), 9, Chick),
            Egg2 = ifelse(notes.failed == "Y", 0, Egg2),
            Chick2 = ifelse(is.na(Chick2) & str_detect(Notes, "chick"), 8, Chick2),
            Chick2 = ifelse(Chick2 == 8 & str_detect(Notes, "no") & str_detect(Notes, "chick"), 9, Chick2),
@@ -295,6 +303,13 @@ keeperN_with_noter <- function(sp_checks_extracted) {
 }
 alc_keeperN_with_notes <- keeperN_with_noter(all_checks_extracted)
 
+
+# can do a manual edit if there is still good data in alc_keeperN_with_notes, changing keeper to Y and changing Egg, Chick, etc as appropriate
+alc_keeperN_with_notes_edited <- edit(alc_keeperN_with_notes)
+all_checks_extracted_edited <- rbind(all_checks_extracted, alc_keeperN_with_notes_edited) %>% 
+  arrange(SPP, NO., DATE)
+# then use all_checks_extracted_edited below
+
 alc_noter <- function(sp_checks) {
   # a helper function to check what the most common notes are and compare to the notes that are specified in notes_extracter() to make sure we're dealing with the important ones
   sp_notes <- sp_checks %>% 
@@ -317,6 +332,7 @@ trim_keepers <- function(sp_checks_extracted){
 
 
 all_checks_trimmed <- trim_keepers(all_checks_extracted)
+all_checks_trimmed <- trim_keepers(all_checks_extracted_edited)
 
 #--------------------------------------------------------
 
@@ -352,7 +368,10 @@ hep_checks <- zsp_checks %>%
          status = ifelse(egg == 0 & chick == 0, "I", status),
          status = ifelse(egg == 0 & is.na(chick), "I", status),
          status = ifelse(is.na(egg) & chick == 0, "I", status),
-         status = ifelse(notes == "not checked" & !is.na(notes), "P", status)) %>% 
+         status = ifelse(notes == "not checked" & !is.na(notes) |
+                        (egg == 9 & chick == 9) |
+                        (egg == 9 & is.na(chick)) |
+                        (is.na(egg) & chick == 9), "P", status)) %>% 
   select(date, nest = no., spp, status, adults, stage, chicks = chick, confidence, notes) %>% 
   arrange(nest, spp, date) %>% 
   unique() 
@@ -367,9 +386,10 @@ filter(alc_hep, status == "A", is.na(stage), is.na(chicks)) # there should be no
 filter(alc_hep, status == "I", !is.na(stage)) # there should be no records with status == "I" and valid data for stage
 filter(alc_hep, status == "I", stage > 0, chicks > 0) # there should be no records with status == "I" and valid data for stage and chicks
 
-
-  
-write.csv(alc_hep, "Alcatraz_ready4screening/alcatraz2018_4screening20190908.csv", row.names = F)
+year <- 2017
+char_date <- as.Date(Sys.time()) %>% as.character() %>% gsub("-", "", .)
+file.path <- paste("Alcatraz_ready4screening/alcatraz", year, "_4screening_codeV", code_version, "_", char_date, ".csv", sep = "")
+write.csv(alc_hep, file.path, row.names = F)
 ###
 
 alc_hep <- read.csv("Alcatraz_ready4screening/alcatraz2018_4screening20190908.csv")
